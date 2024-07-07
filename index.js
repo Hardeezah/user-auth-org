@@ -6,7 +6,7 @@ const userRoutes = require('./routes/userRoutes');
 const organisationRoutes = require('./routes/organisationRoutes');
 const authenticateJWT = require('./middleware/auth');
 
-require('dotenv').config(); 
+require('dotenv').config();
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -16,8 +16,13 @@ connectDB();
 app.use(bodyParser.json());
 app.use('/auth', authRoutes);
 app.use('/api', userRoutes);
-app.use('/api', organisationRoutes); 
+app.use('/api', organisationRoutes);
 
-app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
-});
+// Only listen if not in test environment
+if (process.env.NODE_ENV !== 'test') {
+  app.listen(port, () => {
+    console.log(`Server running on port ${port}`);
+  });
+}
+
+module.exports = app;
