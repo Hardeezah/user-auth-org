@@ -1,28 +1,26 @@
+require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
-const connectDB = require('./config/db');
-const authRoutes = require('./routes/authRoutes');
-const userRoutes = require('./routes/userRoutes');
-const organisationRoutes = require('./routes/organisationRoutes');
-const authenticateJWT = require('./middleware/auth');
-
-require('dotenv').config();
+const authRoutes = require('./routes/auth');
+const organisationRoutes = require('./routes/organisation');
+const { sequelize } = require('./models');
 
 const app = express();
-const port = process.env.PORT || 3000;
-
-connectDB();
 
 app.use(bodyParser.json());
+
 app.use('/auth', authRoutes);
-app.use('/api', userRoutes);
 app.use('/api', organisationRoutes);
 
-// Only listen if not in test environment
-if (process.env.NODE_ENV !== 'test') {
-  app.listen(port, () => {
-    console.log(`Server running on port ${port}`);
-  });
-}
+const PORT = process.env.PORT || 4000;
+
+sequelize.authenticate()
+  .then(() => {
+    console.log('Database connected...');
+    app.listen(PORT, () => {
+      console.log(`Server is running on port ${PORT}`);
+    });
+  })
+  .catch(err => console.log('Error: ' + err));
 
 module.exports = app;

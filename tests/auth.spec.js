@@ -1,11 +1,9 @@
 require('dotenv').config();
 const request = require('supertest');
-const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
+const { sequelize, User, Organisation, UserOrganisations } = require('../models');
 const app = require('../index');
 const { generateToken } = require('../utils/auth');
-const Organisation = require('../models/Organisation');
-const User = require('../models/User');
 
 describe('User Authentication & Organisation', () => {
   let server;
@@ -14,27 +12,13 @@ describe('User Authentication & Organisation', () => {
 
   beforeAll(async () => {
     server = app.listen(4000);
-    await mongoose.connect(process.env.MONGO_URI, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-    });
+    await sequelize.authenticate();
+    await sequelize.sync({ force: true });
   });
 
   afterAll(async () => {
     await server.close();
-    try {
-      await mongoose.connection.db.dropDatabase();
-    } catch (err) {
-      if (err.message.includes('not allowed to do action [dropDatabase]')) {
-        const collections = await mongoose.connection.db.collections();
-        for (let collection of collections) {
-          await collection.deleteMany({});
-        }
-      } else {
-        throw err;
-      }
-    }
-    await mongoose.connection.close();
+    await sequelize.close();
   });
 
   describe('Token Generation', () => {
@@ -197,17 +181,26 @@ describe('User Authentication & Organisation', () => {
         orgId: 'org1',
         name: 'John Organisation',
         description: 'Organisation for John',
-        users: [user1._id],
+        users: [user1.userId],
       });
 
       await org1.save();
 
-      const accessibleOrgs = await Organisation.find({ users: user2._id });
+      const accessibleOrgs = await Organisation.findAll({ 
+        include: [
+          {
+            model: User,
+            through: {
+              where: { userId: user2.userId },
+            },
+          },
+        ],
+      });
 
       expect(accessibleOrgs.length).toBe(0);
 
-      await User.deleteMany({});
-      await Organisation.deleteMany({});
+      await User.destroy({ where: {} });
+      await Organisation.destroy({ where: {} });
     });
   });
 });

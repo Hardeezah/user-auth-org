@@ -1,135 +1,156 @@
-const Organisation = require('../models/Organisation');
-const User = require('../models/User');
-const { v4: uuidv4 } = require('uuid');
+const { Organisation, UserOrganisations, User } = require('../models');
 
-const getUserOrganisations = async (req, res) => {
-  try {
-    const userId = req.user.userId;
-    console.log(`Fetching organisations for user ID: ${userId}`); // Log the user ID
-
-    const organisations = await Organisation.find({ users: userId });
-    console.log(`Found organisations: ${JSON.stringify(organisations)}`); // Log the organisations
-
-    res.status(200).send({
-      status: 'success',
-      message: 'Organisations retrieved successfully',
-      data: { organisations }
-    });
-  } catch (err) {
-    console.error('Error in getUserOrganisations:', err); // More detailed error logging
-    res.status(500).send({
-      status: 'error',
-      message: 'Server error',
-      statusCode: 500
-    });
-  }
-};
-
-const getSingleOrganisation = async (req, res) => {
-  try {
-    const { orgId } = req.params;
-    console.log(`Fetching organisation with ID: ${orgId}`); // Log the orgId
-
-    const organisation = await Organisation.findOne({ orgId });
-    if (!organisation) {
-      return res.status(404).send({
-        status: 'Not Found',
-        message: 'Organisation not found',
-        statusCode: 404
-      });
-    }
-
-    // Manually populate the users field to avoid ObjectId cast error
-    const users = await User.find({ userId: { $in: organisation.users } }).select('-password');
-    organisation.users = users;
-
-    console.log(`Organisation found: ${JSON.stringify(organisation)}`); // Log the organisation
-
-    res.status(200).send({
-      status: 'success',
-      message: 'Organisation details retrieved successfully',
-      data: organisation
-    });
-  } catch (err) {
-    console.error('Error in getSingleOrganisation:', err); // More detailed error logging
-    res.status(500).send({
-      status: 'error',
-      message: 'Server error',
-      statusCode: 500
-    });
-  }
-};
-
-const createOrganisation = async (req, res) => {
+exports.createOrganisation = async (req, res) => {
   try {
     const { name, description } = req.body;
+    const { userId } = req.user;
 
     if (!name) {
-      return res.status(422).send({
-        status: 'Bad Request',
-        message: 'Organisation name is required',
-        statusCode: 422
+      return res.status(422).json({
+        errors: [
+          {
+            field: 'name',
+            message: 'Organisation name is required',
+          },
+        ],
       });
     }
 
-    const orgId = uuidv4();
-    const userId = req.user.userId;
-    console.log(`Creating organisation with name: ${name}, description: ${description}, for user ID: ${userId}`); // Log the details
-
-    const newOrganisation = new Organisation({
-      orgId,
+    const organisation = await Organisation.create({
+      orgId: uuidv4(),
       name,
       description,
-      users: [userId]
     });
-    await newOrganisation.save();
-    console.log(`Organisation created with ID: ${orgId}`); // Log the orgId
 
-    res.status(201).send({
+    await UserOrganisations.create({
+      userId,
+      orgId: organisation.orgId,
+    });
+
+    return res.status(201).json({
       status: 'success',
       message: 'Organisation created successfully',
-      data: newOrganisation
+      data: {
+        orgId: organisation.orgId,
+        name: organisation.name,
+        description: organisation.description,
+      },
     });
   } catch (err) {
-    console.error('Error in createOrganisation:', err);
-    res.status(400).send({
-      status: 'Bad Request',
-      message: 'Client error',
-      statusCode: 400
+    console.error(err);
+    return res.status(500).json({
+      status: 'error',
+      message: 'Internal server error',
     });
   }
 };
 
-const addUserToOrganisation = async (req, res) => {
+exports.getUserOrganisations = async (req, res) => {
+  try {
+    const { userId } = req.user;
+
+    const organisations = await Organisation.findAll({
+      include: [
+        {
+          model: User,
+          through: {
+            where: { userId },
+          },
+        },
+      ],
+    });
+
+    return res.status(200).json({
+      status: 'success',
+      message: 'Organisations fetched successfully',
+      data: { organisations },
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({
+      status: 'error',
+      message: 'Internal server error',
+    });
+  }
+};
+
+exports.getOrganisation = async (req, res) => {
+  try {
+    const { orgId } = req.params;
+    const { userId } = req.user;
+
+    const organisation = await Organisation.findOne({
+      where: { orgId },
+      include: [
+        {
+          model: User,
+          through: {
+            where: { userId },
+          },
+        },
+      ],
+    });
+
+    if (!organisation) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Organisation not found',
+      });
+    }
+
+    return res.status(200).json({
+      status: 'success',
+      message: 'Organisation fetched successfully',
+      data: {
+        orgId: organisation.orgId,
+        name: organisation.name,
+        description: organisation.description,
+      },
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({
+      status: 'error',
+      message: 'Internal server error',
+    });
+  }
+};
+
+exports.addUserToOrganisation = async (req, res) => {
   try {
     const { orgId } = req.params;
     const { userId } = req.body;
-    console.log(`Adding user ID: ${userId} to organisation ID: ${orgId}`); // Log the userId and orgId
 
-    const organisation = await Organisation.findOne({ orgId });
+    const organisation = await Organisation.findOne({ where: { orgId } });
     if (!organisation) {
-      return res.status(404).send({
-        status: 'Not Found',
+      return res.status(404).json({
+        status: 'error',
         message: 'Organisation not found',
-        statusCode: 404
       });
     }
-    organisation.users.push(userId);
-    await organisation.save();
-    console.log(`User ID: ${userId} added to organisation ID: ${orgId}`); // Log the success
 
-    res.status(200).send({
+    const user = await User.findOne({ where: { userId } });
+    if (!user) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'User not found',
+      });
+    }
+
+    await UserOrganisations.create({
+      userId,
+      orgId,
+    });
+
+    return res.status(200).json({
       status: 'success',
-      message: 'User added to organisation successfully'
+      message: 'User added to organisation successfully',
     });
   } catch (err) {
-    console.error('Error in addUserToOrganisation:', err);
-    res.status(400).send({
-      status: 'Bad Request',
-      message: 'Client error',
-      statusCode: 400
+    console.error(err);
+    return res.status(500).json({
+      status: 'error',
+      message: 'Internal server error',
     });
   }
 };
-
-module.exports = { getUserOrganisations, getSingleOrganisation, createOrganisation, addUserToOrganisation };

@@ -1,0 +1,12 @@
+require('dotenv').config();
+
+module.exports = {
+  development: {
+    username: "myuser",
+    password: "mypassword",
+    database: "mydatabase",
+    host: "127.0.0.1",
+    dialect: "postgres"
+  },
+};
+

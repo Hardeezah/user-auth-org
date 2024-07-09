@@ -1,16 +1,20 @@
-const User = require('../models/User');
-const Organisation = require('../models/Organisation');
-const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
-const { v4: uuidv4 } = require('uuid');
+const jwt = require('jsonwebtoken');
+const { User, Organisation } = require('../models');
+const { v4: uuidv4 } = require('uuid');  // Importing the uuid package
+
+const generateToken = (user) => {
+  return jwt.sign({ userId: user.userId, email: user.email }, process.env.JWT_SECRET, {
+    expiresIn: '1h'
+  });
+};
 
 const register = async (req, res) => {
   try {
     const { firstName, lastName, email, password, phone } = req.body;
 
-    // Check for missing fields
     if (!firstName || !lastName || !email || !password) {
-      return res.status(422).send({
+      return res.status(422).json({
         errors: [
           { field: "firstName", message: "First name is required" },
           { field: "lastName", message: "Last name is required" },
@@ -20,54 +24,47 @@ const register = async (req, res) => {
       });
     }
 
-    const userId = uuidv4();
-    const newUser = new User({
-      userId, firstName, lastName, email, password, phone
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const user = await User.create({
+      userId: uuidv4(),  // Generating a unique user ID
+      firstName,
+      lastName,
+      email,
+      password: hashedPassword,
+      phone
     });
 
-    await newUser.save();
-
-    const orgId = uuidv4();
-    const orgName = `${firstName}'s Organisation`;
-    const newOrganisation = new Organisation({
-      orgId, name: orgName, description: '', users: [newUser._id]
+    const organisation = await Organisation.create({
+      orgId: uuidv4(),  // Generating a unique organisation ID
+      name: `${firstName}'s Organisation`,
+      description: `Organisation for ${firstName}`
     });
 
-    await newOrganisation.save();
+    await user.addOrganisation(organisation);
 
-    const token = jwt.sign({ userId: newUser.userId, email: newUser.email }, 'your_jwt_secret', { expiresIn: '1h' });
+    const token = generateToken(user);
 
-    res.status(201).send({
+    res.status(201).json({
       status: 'success',
       message: 'Registration successful',
       data: {
         accessToken: token,
         user: {
-          userId: newUser.userId,
-          firstName: newUser.firstName,
-          lastName: newUser.lastName,
-          email: newUser.email,
-          phone: newUser.phone,
+          userId: user.userId,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          email: user.email,
+          phone: user.phone
         }
       }
     });
-  } catch (err) {
-    console.error(err);
-    if (err.code === 11000) {
-      // Duplicate key error
-      const field = Object.keys(err.keyPattern)[0];
-      res.status(422).send({
-        errors: [
-          { field, message: `${field.charAt(0).toUpperCase() + field.slice(1)} already exists` }
-        ]
-      });
-    } else {
-      res.status(400).send({
-        status: 'Bad request',
-        message: 'Registration unsuccessful',
-        statusCode: 400
-      });
-    }
+  } catch (error) {
+    console.error('Error during registration:', error);  // Enhanced error logging
+    res.status(500).json({
+      status: 'error',
+      message: 'Internal server error',
+      details: error.message  // Include error details in the response
+    });
   }
 };
 
@@ -75,18 +72,29 @@ const login = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    const user = await User.findOne({ email });
-    if (!user || !await bcrypt.compare(password, user.password)) {
-      return res.status(401).send({
+    const user = await User.findOne({ where: { email } });
+
+    if (!user) {
+      return res.status(401).json({
         status: 'Bad request',
         message: 'Authentication failed',
         statusCode: 401
       });
     }
 
-    const token = jwt.sign({ userId: user.userId, email: user.email }, 'your_jwt_secret', { expiresIn: '1h' });
+    const validPassword = await bcrypt.compare(password, user.password);
 
-    res.status(200).send({
+    if (!validPassword) {
+      return res.status(401).json({
+        status: 'Bad request',
+        message: 'Authentication failed',
+        statusCode: 401
+      });
+    }
+
+    const token = generateToken(user);
+
+    res.status(200).json({
       status: 'success',
       message: 'Login successful',
       data: {
@@ -96,18 +104,21 @@ const login = async (req, res) => {
           firstName: user.firstName,
           lastName: user.lastName,
           email: user.email,
-          phone: user.phone,
+          phone: user.phone
         }
       }
     });
-  } catch (err) {
-    console.error(err);
-    res.status(400).send({
-      status: 'Bad request',
-      message: 'Authentication failed',
-      statusCode: 401
+  } catch (error) {
+    console.error('Error during login:', error);  // Enhanced error logging
+    res.status(500).json({
+      status: 'error',
+      message: 'Internal server error',
+      details: error.message  // Include error details in the response
     });
   }
 };
 
-module.exports = { register, login };
+module.exports = {
+  register,
+  login
+};
