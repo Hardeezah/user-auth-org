@@ -1,29 +1,34 @@
-const User = require('../models/User');
+const { User } = require('../models');
 
-const getUserDetails = async (req, res) => {
+const getUser = async (req, res) => {
   try {
-    const userId = req.params.id;
-    const user = await User.findOne({ userId }).select('-password');
+    console.log(`Fetching user with ID: ${req.params.id}`);
+    const user = await User.findOne({ where: { userId: req.params.id } });
     if (!user) {
-      return res.status(404).send({
-        status: 'Not Found',
+      return res.status(404).json({
+        status: 'error',
         message: 'User not found',
-        statusCode: 404
       });
     }
-    res.status(200).send({
+
+    res.status(200).json({
       status: 'success',
-      message: 'User details retrieved successfully',
-      data: user
+      message: 'User found',
+      data: {
+        userId: user.userId,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        email: user.email,
+        phone: user.phone,
+      },
     });
-  } catch (err) {
-    console.error(err);
-    res.status(500).send({
+  } catch (error) {
+    console.error('Get user error:', error);
+    res.status(500).json({
       status: 'error',
       message: 'Server error',
-      statusCode: 500
     });
   }
 };
 
-module.exports = { getUserDetails };
+module.exports = { getUser };

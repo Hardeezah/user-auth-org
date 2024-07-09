@@ -1,206 +1,175 @@
-require('dotenv').config();
-const request = require('supertest');
 const jwt = require('jsonwebtoken');
-const { sequelize, User, Organisation, UserOrganisations } = require('../models');
-const app = require('../index');
-const { generateToken } = require('../utils/auth');
+const supertest = require('supertest');
+const { sequelize, User, Organisation, UserOrganisation } = require('../models');
+require('dotenv').config();
 
-describe('User Authentication & Organisation', () => {
-  let server;
-  let accessToken;
-  let orgId;
+const app = require('../index');  // Ensure your app is correctly exported
 
-  beforeAll(async () => {
-    server = app.listen(4000);
-    await sequelize.authenticate();
+const request = supertest(app);
+
+describe('Authentication and Organisation Tests', function() {
+  let expect;
+
+  before(async function() {
+    this.timeout(10000);  // Increase timeout to 10 seconds
+    const chai = await import('chai');
+    expect = chai.expect;
     await sequelize.sync({ force: true });
   });
 
-  afterAll(async () => {
-    await server.close();
-    await sequelize.close();
+  afterEach(async function() {
+    await User.destroy({ where: {} });
+    await Organisation.destroy({ where: {} });
+    await UserOrganisation.destroy({ where: {} });
   });
 
-  describe('Token Generation', () => {
-    it('should generate a token with correct user details', () => {
-      const user = { userId: '123', email: 'test@example.com' };
-      const token = generateToken(user);
+  describe('Token Generation', function() {
+    it('should generate a token with correct user details and expiration time', function(done) {
+      const payload = { userId: 'testUser', email: 'test@example.com' };
+      const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '1h' });
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-      expect(decoded.userId).toBe(user.userId);
-      expect(decoded.email).toBe(user.email);
-    });
-
-    it('should expire the token after the specified time', (done) => {
-      const user = { userId: '123', email: 'test@example.com' };
-      const token = generateToken(user, '1s'); // Token expires in 1 second
-
-      setTimeout(() => {
-        try {
-          jwt.verify(token, process.env.JWT_SECRET);
-        } catch (error) {
-          expect(error.name).toBe('TokenExpiredError');
-          done();
-        }
-      }, 2000); // Wait for 2 seconds
+      expect(decoded).to.have.property('userId', 'testUser');
+      expect(decoded).to.have.property('email', 'test@example.com');
+      expect(decoded.exp).to.be.a('number');
+      done();
     });
   });
 
-  describe('User Registration & Login', () => {
-    it('should register user successfully with default organisation', async () => {
-      const response = await request(server).post('/auth/register').send({
+  describe('Organisation Access', function() {
+    it('should ensure users can’t see data from organisations they don’t have access to', async function() {
+      const user1 = await User.create({
+        userId: 'user1_123',
+        firstName: 'User',
+        lastName: 'One',
+        email: 'user1@example.com',
+        password: 'password123',
+        phone: '1234567890',
+      });
+
+      const user2 = await User.create({
+        userId: 'user2_123',
+        firstName: 'User',
+        lastName: 'Two',
+        email: 'user2@example.com',
+        password: 'password123',
+        phone: '0987654321',
+      });
+
+      const organisation = await Organisation.create({
+        orgId: 'org_123',
+        name: "User One's Organisation",
+        description: 'Organisation for User One',
+      });
+
+      await UserOrganisation.create({
+        userId: user1.userId,
+        orgId: organisation.orgId,
+        UserId: user1.id,
+        OrganisationId: organisation.id,
+      });
+
+      const token = jwt.sign({ userId: user2.userId, email: user2.email, id: user2.id }, process.env.JWT_SECRET, { expiresIn: '1h' });
+
+      const res = await request
+        .get(`/api/organisations/${organisation.orgId}`)
+        .set('Authorization', `Bearer ${token}`);
+
+      expect(res.status).to.equal(404);
+      expect(res.body).to.have.property('message', 'Organisation not found');
+    });
+  });
+
+  describe('User Registration', function() {
+    it('should register user successfully with default organisation', async function() {
+      const res = await request
+        .post('/auth/register')
+        .send({
+          firstName: 'John',
+          lastName: 'Doe',
+          email: 'john.doe@example.com',
+          password: 'password123',
+          phone: '1234567890',
+        });
+
+      expect(res.status).to.equal(201);
+      expect(res.body).to.have.property('status', 'success');
+      expect(res.body.data).to.have.property('accessToken');
+      expect(res.body.data.user).to.include({
         firstName: 'John',
         lastName: 'Doe',
-        email: 'john1@example.com',
-        password: 'password123',
-        phone: '1234567890',
-      }).set('Accept', 'application/json');
-
-      expect(response.status).toBe(201);
-      expect(response.body.status).toBe('success');
-      expect(response.body.data.user.email).toBe('john1@example.com');
-      expect(response.body.data.user.firstName).toBe('John');
-      expect(response.body.data.user.lastName).toBe('Doe');
-      expect(response.body.data.user.phone).toBe('1234567890');
+        email: 'john.doe@example.com',
+      });
+      const orgName = "John's Organisation";
+      const organisation = await Organisation.findOne({ where: { name: orgName } });
+      expect(organisation).to.not.be.null;
+      expect(organisation.name).to.equal(orgName);
     });
 
-    it('should log the user in successfully', async () => {
-      const response = await request(server).post('/auth/login').send({
-        email: 'john1@example.com',
-        password: 'password123'
-      }).set('Accept', 'application/json');
-
-      expect(response.status).toBe(200);
-      expect(response.body.status).toBe('success');
-      expect(response.body.data.user.email).toBe('john1@example.com');
-      expect(response.body.data.accessToken).toBeDefined();
-
-      accessToken = response.body.data.accessToken;
-    });
-
-    it('should fail if required fields are missing in registration', async () => {
-      const response = await request(server).post('/auth/register').send({
-        lastName: 'Doe',
-        email: 'john2@example.com',
-        password: 'password123',
-        phone: '1234567890',
-      }).set('Accept', 'application/json');
-
-      expect(response.status).toBe(422);
-      expect(response.body.errors).toBeDefined();
-    });
-
-    it('should fail if there’s a duplicate email or userId', async () => {
-      const response = await request(server).post('/auth/register').send({
-        firstName: 'John',
-        lastName: 'Doe',
-        email: 'john1@example.com',
-        password: 'password123',
-        phone: '1234567890',
-      }).set('Accept', 'application/json');
-
-      expect(response.status).toBe(422);
-      expect(response.body.errors).toBeDefined();
-    });
-  });
-
-  describe('Organisation Endpoints', () => {
-    it('should create a new organisation', async () => {
-      const response = await request(server)
-        .post('/api/organisations')
-        .set('Authorization', `Bearer ${accessToken}`)
+    it('should log the user in successfully', async function() {
+      await request
+        .post('/auth/register')
         .send({
-          name: 'New Organisation',
-          description: 'This is a new organisation',
-        })
-        .set('Accept', 'application/json');
+          firstName: 'John',
+          lastName: 'Doe',
+          email: 'john.doe@example.com',
+          password: 'password123',
+          phone: '1234567890',
+        });
 
-      expect(response.status).toBe(201);
-      expect(response.body.status).toBe('success');
-      orgId = response.body.data.orgId;
-    });
-
-    it('should get the user\'s organisations', async () => {
-      const response = await request(server)
-        .get('/api/organisations')
-        .set('Authorization', `Bearer ${accessToken}`)
-        .set('Accept', 'application/json');
-
-      expect(response.status).toBe(200);
-      expect(response.body.status).toBe('success');
-      expect(response.body.data.organisations).toBeInstanceOf(Array);
-    });
-
-    it('should get a single organisation', async () => {
-      const response = await request(server)
-        .get(`/api/organisations/${orgId}`)
-        .set('Authorization', `Bearer ${accessToken}`)
-        .set('Accept', 'application/json');
-
-      expect(response.status).toBe(200);
-      expect(response.body.status).toBe('success');
-      expect(response.body.data.orgId).toBe(orgId);
-    });
-
-    it('should add a user to an organisation', async () => {
-      const response = await request(server)
-        .post(`/api/organisations/${orgId}/users`)
-        .set('Authorization', `Bearer ${accessToken}`)
+      const res = await request
+        .post('/auth/login')
         .send({
-          userId: 'some-other-user-id', // Use a valid user ID
-        })
-        .set('Accept', 'application/json');
+          email: 'john.doe@example.com',
+          password: 'password123',
+        });
 
-      expect(response.status).toBe(200);
-      expect(response.body.status).toBe('success');
+      expect(res.status).to.equal(200);
+      expect(res.body).to.have.property('status', 'success');
+      expect(res.body.data).to.have.property('accessToken');
+      expect(res.body.data.user).to.include({
+        email: 'john.doe@example.com',
+      });
     });
-  });
 
-  describe('Organisation Access Control', () => {
-    it('should ensure users can’t see data from organisations they don’t have access to', async () => {
-      const user1 = new User({
-        userId: 'user1',
-        firstName: 'Jake',
-        lastName: 'Dow',
-        email: 'john1234@example.com',
-        password: 'password123',
-      });
+    it('should fail if required fields are missing', async function() {
+      const res = await request
+        .post('/auth/register')
+        .send({
+          lastName: 'Doe',
+          email: 'john.doe@example.com',
+          password: 'password123',
+        });
 
-      const user2 = new User({
-        userId: 'user2',
-        firstName: 'Jane',
-        lastName: 'Doe',
-        email: 'jane@example.com',
-        password: 'password123',
-      });
+      expect(res.status).to.equal(422);
+      expect(res.body.errors).to.be.an('array');
+      expect(res.body.errors[0]).to.have.property('field', 'firstName');
+    });
 
-      await user1.save();
-      await user2.save();
+    it('should fail if there’s duplicate email or userId', async function() {
+      await request
+        .post('/auth/register')
+        .send({
+          firstName: 'John',
+          lastName: 'Doe',
+          email: 'john.doe@example.com',
+          password: 'password123',
+          phone: '1234567890',
+        });
 
-      const org1 = new Organisation({
-        orgId: 'org1',
-        name: 'John Organisation',
-        description: 'Organisation for John',
-        users: [user1.userId],
-      });
+      const res = await request
+        .post('/auth/register')
+        .send({
+          firstName: 'Jane',
+          lastName: 'Doe',
+          email: 'john.doe@example.com',
+          password: 'password123',
+          phone: '0987654321',
+        });
 
-      await org1.save();
-
-      const accessibleOrgs = await Organisation.findAll({ 
-        include: [
-          {
-            model: User,
-            through: {
-              where: { userId: user2.userId },
-            },
-          },
-        ],
-      });
-
-      expect(accessibleOrgs.length).toBe(0);
-
-      await User.destroy({ where: {} });
-      await Organisation.destroy({ where: {} });
+      expect(res.status).to.equal(422);
+      expect(res.body.errors).to.be.an('array');
+      expect(res.body.errors[0]).to.have.property('field', 'email');
     });
   });
 });

@@ -1,26 +1,23 @@
-require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
-const authRoutes = require('./routes/auth');
-const organisationRoutes = require('./routes/organisation');
 const { sequelize } = require('./models');
 
+const authRoutes = require('./routes/auth');
+const userRoutes = require('./routes/users');
+const organisationRoutes = require('./routes/organisations');
+
 const app = express();
+const PORT = process.env.PORT || 3000;
 
 app.use(bodyParser.json());
-
 app.use('/auth', authRoutes);
-app.use('/api', organisationRoutes);
+app.use('/api/users', userRoutes);
+app.use('/api/organisations', organisationRoutes);
 
-const PORT = process.env.PORT || 4000;
-
-sequelize.authenticate()
-  .then(() => {
-    console.log('Database connected...');
-    app.listen(PORT, () => {
-      console.log(`Server is running on port ${PORT}`);
-    });
-  })
-  .catch(err => console.log('Error: ' + err));
+sequelize.sync({ force: true }).then(() => {
+  app.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
+  });
+});
 
 module.exports = app;

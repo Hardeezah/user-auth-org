@@ -1,11 +1,17 @@
 const express = require('express');
+const {
+  createOrganisation,
+  getOrganisations,
+  getOrganisation,
+  addUserToOrganisation,
+} = require('../controllers/organisationController');
+const authMiddleware = require('../middlewares/authMiddleware');
+const { validateOrganisation } = require('../validations/organisationValidation');
 const router = express.Router();
-const auth = require('../middleware/auth');
-const { createOrganisation, getUserOrganisations, getOrganisation, addUserToOrganisation } = require('../controllers/organisationController');
 
-router.post('/organisations', auth, createOrganisation);
-router.get('/organisations', auth, getUserOrganisations);
-router.get('/organisations/:orgId', auth, getOrganisation);
-router.post('/organisations/:orgId/users', auth, addUserToOrganisation);
+router.post('/', authMiddleware, validateOrganisation, createOrganisation);
+router.get('/', authMiddleware, getOrganisations);
+router.get('/:orgId', authMiddleware, getOrganisation);
+router.post('/:orgId/users', authMiddleware, addUserToOrganisation);
 
 module.exports = router;

@@ -1,33 +1,24 @@
-const { Organisation, UserOrganisations, User } = require('../models');
+const { Organisation, UserOrganisation } = require('../models');
 
-exports.createOrganisation = async (req, res) => {
+const createOrganisation = async (req, res) => {
+  const { name, description } = req.body;
+  const userId = req.user.userId;
+
   try {
-    const { name, description } = req.body;
-    const { userId } = req.user;
-
-    if (!name) {
-      return res.status(422).json({
-        errors: [
-          {
-            field: 'name',
-            message: 'Organisation name is required',
-          },
-        ],
-      });
-    }
-
     const organisation = await Organisation.create({
-      orgId: uuidv4(),
+      orgId: `${name}_org_${Date.now()}`,
       name,
       description,
     });
 
-    await UserOrganisations.create({
+    await UserOrganisation.create({
       userId,
       orgId: organisation.orgId,
+      UserId: req.user.id,
+      OrganisationId: organisation.id,
     });
 
-    return res.status(201).json({
+    res.status(201).json({
       status: 'success',
       message: 'Organisation created successfully',
       data: {
@@ -36,61 +27,42 @@ exports.createOrganisation = async (req, res) => {
         description: organisation.description,
       },
     });
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Internal server error',
+  } catch (error) {
+    console.error('Create organisation error:', error);
+    res.status(400).json({
+      status: 'Bad request',
+      message: 'Client error',
+      statusCode: 400,
     });
   }
 };
 
-exports.getUserOrganisations = async (req, res) => {
+const getOrganisations = async (req, res) => {
   try {
-    const { userId } = req.user;
+    const userOrganisations = await UserOrganisation.findAll({ where: { userId: req.user.userId } });
+    const organisationIds = userOrganisations.map(uo => uo.orgId);
 
-    const organisations = await Organisation.findAll({
-      include: [
-        {
-          model: User,
-          through: {
-            where: { userId },
-          },
-        },
-      ],
-    });
+    const organisations = await Organisation.findAll({ where: { orgId: organisationIds } });
 
-    return res.status(200).json({
+    res.status(200).json({
       status: 'success',
-      message: 'Organisations fetched successfully',
-      data: { organisations },
+      message: 'Organisations retrieved successfully',
+      data: {
+        organisations,
+      },
     });
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({
+  } catch (error) {
+    console.error('Get organisations error:', error);
+    res.status(500).json({
       status: 'error',
-      message: 'Internal server error',
+      message: 'Server error',
     });
   }
 };
 
-exports.getOrganisation = async (req, res) => {
+const getOrganisation = async (req, res) => {
   try {
-    const { orgId } = req.params;
-    const { userId } = req.user;
-
-    const organisation = await Organisation.findOne({
-      where: { orgId },
-      include: [
-        {
-          model: User,
-          through: {
-            where: { userId },
-          },
-        },
-      ],
-    });
-
+    const organisation = await Organisation.findOne({ where: { orgId: req.params.orgId } });
     if (!organisation) {
       return res.status(404).json({
         status: 'error',
@@ -98,59 +70,52 @@ exports.getOrganisation = async (req, res) => {
       });
     }
 
-    return res.status(200).json({
+    res.status(200).json({
       status: 'success',
-      message: 'Organisation fetched successfully',
+      message: 'Organisation found',
       data: {
         orgId: organisation.orgId,
         name: organisation.name,
         description: organisation.description,
       },
     });
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({
+  } catch (error) {
+    console.error('Get organisation error:', error);
+    res.status(500).json({
       status: 'error',
-      message: 'Internal server error',
+      message: 'Server error',
     });
   }
 };
 
-exports.addUserToOrganisation = async (req, res) => {
+const addUserToOrganisation = async (req, res) => {
+  const { userId } = req.body;
+
   try {
-    const { orgId } = req.params;
-    const { userId } = req.body;
-
-    const organisation = await Organisation.findOne({ where: { orgId } });
-    if (!organisation) {
-      return res.status(404).json({
-        status: 'error',
-        message: 'Organisation not found',
-      });
-    }
-
-    const user = await User.findOne({ where: { userId } });
-    if (!user) {
-      return res.status(404).json({
-        status: 'error',
-        message: 'User not found',
-      });
-    }
-
-    await UserOrganisations.create({
+    const userOrganisation = await UserOrganisation.create({
       userId,
-      orgId,
+      orgId: req.params.orgId,
+      UserId: req.user.id,
+      OrganisationId: req.params.orgId,
     });
 
-    return res.status(200).json({
+    res.status(200).json({
       status: 'success',
       message: 'User added to organisation successfully',
     });
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Internal server error',
+  } catch (error) {
+    console.error('Add user to organisation error:', error);
+    res.status(400).json({
+      status: 'Bad request',
+      message: 'Client error',
+      statusCode: 400,
     });
   }
+};
+
+module.exports = {
+  createOrganisation,
+  getOrganisations,
+  getOrganisation,
+  addUserToOrganisation,
 };
