@@ -1,23 +1,24 @@
-const express = require('express');
-const bodyParser = require('body-parser');
-const { sequelize } = require('./models');
-
-const authRoutes = require('./routes/auth');
-const userRoutes = require('./routes/users');
-const organisationRoutes = require('./routes/organisations');
+import express from 'express';
+import bodyParser from 'body-parser';
+import { sequelize } from './models/index.js';
+import authRoutes from './routes/auth.js';
+import userRoutes from './routes/users.js';
+import organisationRoutes from './routes/organisations.js';
 
 const app = express();
-const PORT = process.env.PORT || 3000;
 
 app.use(bodyParser.json());
+
 app.use('/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/organisations', organisationRoutes);
 
-sequelize.sync({ force: true }).then(() => {
+const PORT = process.env.PORT || 3000;
+
+sequelize.sync().then(() => {
   app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
   });
 });
 
-module.exports = app;
+export { app };
